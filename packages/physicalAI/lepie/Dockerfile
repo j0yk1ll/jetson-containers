@@ -1,5 +1,5 @@
 #---
-# name: LePIE
+# name: lepie
 # group: robots
 # docs: docs.md
 # depends: [cmake]
