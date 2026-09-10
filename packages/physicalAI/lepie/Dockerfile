@@ -48,6 +48,7 @@ RUN set -eux; \
     cmake -S . -B ${LEPIE_BUILD} \
         -G "${LEPIE_CMAKE_GENERATOR}" \
         -DGGML_CUDA=ON \
+        -DLLAMA_BUILD_UI=OFF \
         -DCMAKE_BUILD_TYPE=${LEPIE_BUILD_TYPE}; \
     cmake --build ${LEPIE_BUILD} --target llama-server -j"${JOBS}"
 
