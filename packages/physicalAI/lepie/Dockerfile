@@ -3,7 +3,6 @@
 # group: robots
 # docs: docs.md
 # depends: [cuda, cmake]
-# buildkit_device: nvidia.com/gpu=all
 # requires: '>=36'
 # test: test.sh
 #---
