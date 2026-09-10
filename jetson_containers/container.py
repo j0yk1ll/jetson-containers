@@ -323,9 +323,9 @@ def build_container(
 
         # Optional registry bridge for docker-container BuildKit builders.
         # These builders cannot consume images that only exist in Docker
-        # Engine's local image store. Intermediate images remain --load'ed
-        # for the existing tests, then are additionally pushed here for use
-        # as the next BASE_IMAGE.
+        # Engine's local image store. To reduce peak disk usage, intermediate
+        # images are pushed directly to this registry instead of being --load'ed
+        # into the Docker Engine. Only the final image is --load'ed locally.
         local_build_registry = os.environ.get(
             'JETSON_CONTAINERS_LOCAL_REGISTRY', ''
         ).strip().rstrip('/')
@@ -367,6 +367,16 @@ def build_container(
                 # Default Docker BuildKit limit is 2MiB which can clip large build outputs
                 buildkit_log_size = os.environ.get('BUILDKIT_STEP_LOG_MAX_SIZE', '524288000')  # 500MB default
 
+                registry_intermediate = (
+                    use_buildx
+                    and local_build_registry
+                    and idx < len(packages) - 1
+                )
+                registry_container_name = (
+                    f"{local_build_registry}/{container_name}"
+                    if registry_intermediate else ''
+                )
+
                 if use_buildx:
                     effective_buildkit_progress = buildkit_progress
                     if effective_buildkit_progress == 'tty' and not sys.stdout.isatty():
@@ -376,7 +386,12 @@ def build_container(
                     buildkit_env = f"DOCKER_BUILDKIT=1 BUILDKIT_STEP_LOG_MAX_SIZE={buildkit_log_size}"
                     cmd = f"{sudo_prefix()}{buildkit_env} docker buildx build --network=host --shm-size=8g" + _NEWLINE_
                     cmd += f"  --progress={effective_buildkit_progress}" + _NEWLINE_
-                    cmd += f"  --load" + _NEWLINE_  # Load image into local Docker daemon
+                    if registry_intermediate:
+                        # Export intermediate images directly to the registry so
+                        # they aren't duplicated in Docker's local image store.
+                        cmd += f"  --push" + _NEWLINE_
+                    else:
+                        cmd += f"  --load" + _NEWLINE_  # Load only the final image locally
                     if device_requested:
                         cmd += f"  --allow device" + _NEWLINE_
                     for cache in cache_from:
@@ -388,7 +403,9 @@ def build_container(
                     effective_buildkit_progress = None
                     buildkit_env = f"DOCKER_BUILDKIT=0"
                     cmd = f"{sudo_prefix()}{buildkit_env} docker build --network=host --shm-size=8g" + _NEWLINE_
-                cmd += f"  --tag {container_name}" + _NEWLINE_
+
+                build_tag = registry_container_name if registry_intermediate else container_name
+                cmd += f"  --tag {build_tag}" + _NEWLINE_
 
                 if active_buildkit_device or (ccache and use_buildx):
                     dockerfilepath = _prepare_buildkit_dockerfile(
@@ -486,37 +503,30 @@ def build_container(
                     status = subprocess.run(run_cmd, executable='/bin/bash', shell=True, check=True)
                     print('')
 
-                # Bridge intermediate Buildx images through a local registry.
-                # Keep --load so existing Docker-based tests still work.
-                if use_buildx and local_build_registry and idx < len(packages) - 1:
-                    registry_container_name = f"{local_build_registry}/{container_name}"
-
-                    registry_cmd = (
-                        f"{sudo_prefix()}docker tag "
-                        f"{shlex.quote(container_name)} "
-                        f"{shlex.quote(registry_container_name)}"
-                        f" && "
-                        f"{sudo_prefix()}docker push "
-                        f"{shlex.quote(registry_container_name)}"
-                    )
-
+                if registry_intermediate:
                     log_info(
-                        f"Publishing intermediate build image "
+                        f"Published intermediate build image directly to "
                         f"{registry_container_name}"
                     )
-
-                    if not simulate:
-                        subprocess.run(
-                            registry_cmd,
-                            executable='/bin/bash',
-                            shell=True,
-                            check=True
-                        )
             else:
                 tag_container(base, container_name, simulate)
 
-            # run tests on the intermediate container
-            if package not in skip_tests and 'intermediate' not in skip_tests and 'all' not in skip_tests:
+            # Run tests on locally-loaded intermediate containers. Registry-only
+            # intermediates intentionally skip this pass to avoid pulling/loading
+            # large images back into Docker and defeating the disk-space savings.
+            skip_registry_intermediate_test = (
+                'dockerfile' in pkg
+                and use_buildx
+                and local_build_registry
+                and idx < len(packages) - 1
+            )
+
+            if (
+                not skip_registry_intermediate_test
+                and package not in skip_tests
+                and 'intermediate' not in skip_tests
+                and 'all' not in skip_tests
+            ):
                 if len(test_only) == 0 or package in test_only:
                     status_text = f"[{idx+1}/{len(packages)}] Testing {package} ({container_name})"
                     current_time = datetime.datetime.now().strftime("%H:%M:%S")
