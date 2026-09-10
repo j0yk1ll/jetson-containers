@@ -2,7 +2,7 @@
 # name: lepie
 # group: robots
 # docs: docs.md
-# depends: [cmake]
+# depends: [cuda, cmake]
 # buildkit_device: nvidia.com/gpu=all
 # requires: '>=36'
 # test: test.sh
