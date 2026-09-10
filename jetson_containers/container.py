@@ -321,6 +321,15 @@ def build_container(
         # Initialize build timer
         timer = BuildTimer()
 
+        # Optional registry bridge for docker-container BuildKit builders.
+        # These builders cannot consume images that only exist in Docker
+        # Engine's local image store. Intermediate images remain --load'ed
+        # for the existing tests, then are additionally pushed here for use
+        # as the next BASE_IMAGE.
+        local_build_registry = os.environ.get(
+            'JETSON_CONTAINERS_LOCAL_REGISTRY', ''
+        ).strip().rstrip('/')
+
         # build chain of all packages
         for idx, package in enumerate(packages):
             pkg = find_package(package)
@@ -476,6 +485,33 @@ def build_container(
                 if not simulate:  # remove the line breaks that were added for readability, and set the shell to bash so we can use $PIPESTATUS
                     status = subprocess.run(run_cmd, executable='/bin/bash', shell=True, check=True)
                     print('')
+
+                # Bridge intermediate Buildx images through a local registry.
+                # Keep --load so existing Docker-based tests still work.
+                if use_buildx and local_build_registry and idx < len(packages) - 1:
+                    registry_container_name = f"{local_build_registry}/{container_name}"
+
+                    registry_cmd = (
+                        f"{sudo_prefix()}docker tag "
+                        f"{shlex.quote(container_name)} "
+                        f"{shlex.quote(registry_container_name)}"
+                        f" && "
+                        f"{sudo_prefix()}docker push "
+                        f"{shlex.quote(registry_container_name)}"
+                    )
+
+                    log_info(
+                        f"Publishing intermediate build image "
+                        f"{registry_container_name}"
+                    )
+
+                    if not simulate:
+                        subprocess.run(
+                            registry_cmd,
+                            executable='/bin/bash',
+                            shell=True,
+                            check=True
+                        )
             else:
                 tag_container(base, container_name, simulate)
 
@@ -490,8 +526,20 @@ def build_container(
                     log_status(f"{status_text}{time_text}")
                     test_container(container_name, pkg, simulate, build_idx=idx)
 
-            # use this container as the next base
-            base = container_name
+            # Use this container as the next base.
+            #
+            # docker-container BuildKit builders cannot resolve images that
+            # exist only in the Docker Engine image store, so intermediate
+            # Buildx stages can optionally be consumed through a registry.
+            if (
+                'dockerfile' in pkg
+                and use_buildx
+                and local_build_registry
+                and idx < len(packages) - 1
+            ):
+                base = f"{local_build_registry}/{container_name}"
+            else:
+                base = container_name
             timer.next_stage()
 
         # tag the final container
