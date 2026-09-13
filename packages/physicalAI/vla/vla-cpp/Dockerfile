@@ -53,7 +53,9 @@ RUN git clone ${VLA_CPP_REPO} ${VLA_CPP_HOME} && \
     cd ${VLA_CPP_HOME} && \
     git fetch --tags --force && \
     git checkout ${VLA_CPP_REF} && \
-    git rev-parse HEAD > /opt/vla-cpp.commit
+    git rev-parse HEAD > /opt/vla-cpp.commit && \
+    sed -i 's/if(VLA_IPO_OK AND CMAKE_BUILD_TYPE STREQUAL "Release")/if(VLA_IPO_OK AND CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT GGML_CUDA)/' CMakeLists.txt && \
+    grep -F 'if(VLA_IPO_OK AND CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT GGML_CUDA)' CMakeLists.txt
 
 WORKDIR ${VLA_CPP_HOME}
 
