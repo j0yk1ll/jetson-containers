@@ -31,7 +31,6 @@ RUN apt-get update && \
         ca-certificates \
         curl \
         libzmq3-dev \
-        cppzmq-dev \
         libprotobuf-dev \
         protobuf-compiler \
         python3 \
