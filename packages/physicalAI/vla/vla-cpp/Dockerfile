@@ -38,6 +38,16 @@ RUN apt-get update && \
         python3-pip \
         && rm -rf /var/lib/apt/lists/*
 
+ARG CPPZMQ_VERSION=v4.10.0
+
+RUN git clone --depth 1 --branch ${CPPZMQ_VERSION} \
+        https://github.com/zeromq/cppzmq.git /tmp/cppzmq && \
+    cmake -S /tmp/cppzmq -B /tmp/cppzmq/build \
+        -DCPPZMQ_BUILD_TESTS=OFF && \
+    cmake --build /tmp/cppzmq/build -j2 && \
+    cmake --install /tmp/cppzmq/build && \
+    rm -rf /tmp/cppzmq
+
 WORKDIR /opt
 
 RUN git clone ${VLA_CPP_REPO} ${VLA_CPP_HOME} && \
